@@ -3,6 +3,8 @@
 These are the topics that ship-quality compilers, browsers, kernels, and
 high-performance language runtimes get their last 5-30% from.
 
+![PGO feedback loop: instrument, run, merge profiles, then re-optimize with them](figures/pgo.svg)
+
 ## Map
 
 | #  | Subject                                | What you'll learn                            |

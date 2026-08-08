@@ -4,6 +4,8 @@
 > function with simple analysis. These are the cheapest passes and the ones
 > you must recognize on sight when reading assembly.
 
+![CSE shares a common subexpression instead of recomputing it](figures/cse.svg)
+
 ## Map of this chapter
 
 | #  | Example                              | Optimization                                   |
@@ -39,6 +41,8 @@
 
 ## 01 · Constant folding
 
+![Before/after: a constant expression is evaluated at compile time](figures/01_const_fold.svg)
+
 **Definition.** Evaluate any expression whose operands are *known constants*
 at compile time. The compiler replaces the expression with its constant
 result.
@@ -50,15 +54,17 @@ result.
 
 ### Diagram — what the optimizer sees
 
-```
-   BEFORE                              AFTER
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                              AFTER
    ───────                            ───────
         +                              13
        / \                            (a constant node;
       *   1                            the whole tree is gone)
      / \
-    3   4
-```
+    3   4</code></pre>
+</details>
 
 In SSA / LLVM IR:
 
@@ -99,18 +105,22 @@ You will see literally `mov eax, 13` at `-O1` and above.
 
 ## 02 · Constant & Copy Propagation
 
+![Before/after: known constants replace each use and fold](figures/02_const_propagation.svg)
+
 **Constant propagation** replaces uses of a name by its known constant value.
 **Copy propagation** replaces uses of a copy `b = a` by `a` itself. SSA makes
 both trivial because each name has exactly one definition.
 
-```
-   BEFORE                       AFTER constant prop      AFTER copy prop
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                       AFTER constant prop      AFTER copy prop
    ───────                      ──────────────────       ──────────────────
    a = 5                        a = 5                    a = 5
    b = a + 2                    b = 7                    b = 7
    c = b * 3                    c = 21                   c = 21
-   d = c                        d = 21                   d = 21   (or omitted)
-```
+   d = c                        d = 21                   d = 21   (or omitted)</code></pre>
+</details>
 
 ### Diagram — SSA makes it a single hash-table walk
 
@@ -180,6 +190,8 @@ expressions that hash to the same number are interchangeable.
 
 ## 04 · Dead Code Elimination
 
+![Before/after: an unused, side-effect-free computation is removed](figures/04_dead_code.svg)
+
 If an instruction's result is **never used** *and* the instruction has no
 side effects, remove it. **Aggressive DCE (ADCE)** is the dual: assume every
 instruction is dead, then mark live anything that affects program output, and
@@ -195,8 +207,10 @@ delete the rest.
 
 ### Diagram — liveness sweep
 
-```
-            ┌────────┐
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>            ┌────────┐
             │ ret b  │ ◄── live (program output)
             └────┬───┘
                  │ uses b
@@ -207,8 +221,8 @@ delete the rest.
             ┌─────────────────────┐
             │ a = expensive_thing │ ◄── nothing uses it; no side effects
             │                     │     → DEAD, removed.
-            └─────────────────────┘
-```
+            └─────────────────────┘</code></pre>
+</details>
 
 ### Where it lives
 
@@ -226,19 +240,23 @@ delete the rest.
 
 ## 05 · Algebraic simplification
 
+![Rewrite rules that replace expressions with cheaper equivalents](figures/05_algebraic_simpl.svg)
+
 Replace expressions by mathematically-equivalent but cheaper forms.
 
-```
-   x + 0          ───► x
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   x + 0          ───► x
    x * 1          ───► x
    x * 0          ───► 0          (for integers; FP needs careful)
    x - x          ───► 0          (UB-aware for FP NaN)
-   x & 0          ───► 0
+   x &amp; 0          ───► 0
    x | 0          ───► x
    x ^ x          ───► 0
-   (x << a) << b  ───► x << (a+b) (under nsw/nuw)
-   !!x            ───► x ≠ 0      (boolean idiom)
-```
+   (x &lt;&lt; a) &lt;&lt; b  ───► x &lt;&lt; (a+b) (under nsw/nuw)
+   !!x            ───► x ≠ 0      (boolean idiom)</code></pre>
+</details>
 
 ### Pitfalls — IEEE-754 is not algebra
 
@@ -254,21 +272,33 @@ opt in:
 That's why aggressive FP simplification needs `-ffast-math` (GCC/Clang) or
 `-ffinite-math-only`, `-fno-signed-zeros`, etc.
 
+### Where it lives
+
+- **LLVM**: `InstCombine` (the rewrite engine) plus `Reassociate`, which
+  canonicalizes `(a + b) + c` into a shape where constants group together
+  so folding and CSE can fire. Reassociation on floats requires the `reassoc`
+  fast-math flag on the instruction.
+- **GCC**: `tree-ssa-reassoc.cc` and the `fold`/`match.pd` pattern set.
+
 ---
 
 ## 06 · Strength reduction
 
+![Rewrite rules turning multiply/divide into shifts and adds](figures/06_strength_reduction.svg)
+
 Replace **expensive** operations by **cheaper** equivalent ones.
 
-```
-   x * 2               ───►  x << 1
-   x * 8               ───►  x << 3
-   x / 2  (unsigned)   ───►  x >> 1
-   x % 8  (unsigned)   ───►  x & 7
-   x * 9               ───►  (x << 3) + x        (lea on x86: lea eax,[rax*8+rax])
-   x * 10              ───►  (x << 3) + (x << 1)
-   x * 7               ───►  (x << 3) - x
-```
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   x * 2               ───►  x &lt;&lt; 1
+   x * 8               ───►  x &lt;&lt; 3
+   x / 2  (unsigned)   ───►  x &gt;&gt; 1
+   x % 8  (unsigned)   ───►  x &amp; 7
+   x * 9               ───►  (x &lt;&lt; 3) + x        (lea on x86: lea eax,[rax*8+rax])
+   x * 10              ───►  (x &lt;&lt; 3) + (x &lt;&lt; 1)
+   x * 7               ───►  (x &lt;&lt; 3) - x</code></pre>
+</details>
 
 For **division by a constant**, both compilers replace `x / c` by a
 multiplication by a magic constant and a shift (Granlund & Montgomery 1994).
@@ -300,19 +330,23 @@ See `02_loop_optimizations/`.
 
 ## 07 · Peephole / instruction combining
 
+![Small-window instruction rewrites into cheaper sequences](figures/07_peephole.svg)
+
 A peephole optimization looks at a **small window** (2–4 instructions) and
 recognizes a better sequence. LLVM's `InstCombine` is the canonical
 implementation: a thousand rewrite rules applied to a fixed point.
 
 Examples:
 
-```
-   lea  rax, [rdi + 0]                ───►  mov rax, rdi
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   lea  rax, [rdi + 0]                ───►  mov rax, rdi
    add  eax, 1                        ───►  inc eax        (size only, often slower)
    cmp  eax, 0                        ───►  test eax, eax
    xor  eax, eax  /  mov eax, 0       ───►  xor eax, eax   (smaller, breaks dep)
-   mov  rcx, rax  /  shr rcx, 32      ───►  mov ecx, eax   (zero-extends already)
-```
+   mov  rcx, rax  /  shr rcx, 32      ───►  mov ecx, eax   (zero-extends already)</code></pre>
+</details>
 
 The most important LLVM peephole rule:
 
@@ -326,6 +360,8 @@ This drives many subsequent simplifications.
 
 ## 08 · Branch simplification
 
+![Before/after: a trivial branch becomes a branchless compare](figures/08_branch_simpl.svg)
+
 Constant condition or trivially-true / false → remove the branch.
 
 ```c
@@ -338,15 +374,17 @@ if (p)  return 1;
 The cleanup is performed by **SimplifyCFG** in LLVM and `cleanup_cfg` in GCC.
 See `08_branch_simpl.c`.
 
-```
-   BEFORE                                AFTER
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                                AFTER
    ───────                              ───────
        BB1                                BB1
         │ if 1                            │
         ├────────►BB2 (X)                 ▼
         └────────►BB3 (Y)                BB2 (X)
-                    └─►BB4                 └─►BB4
-```
+                    └─►BB4                 └─►BB4</code></pre>
+</details>
 
 ---
 
@@ -371,6 +409,8 @@ See `09_bit_tricks.c` for source you can compile and inspect.
 ---
 
 ## 10 · Load / store combining
+
+![Before/after: four adjacent byte loads become one word load](figures/10_load_combine.svg)
 
 Adjacent loads of `uint8_t a[4]` that are then shifted and OR'd into a
 `uint32_t` get combined into a **single 32-bit load** (subject to alignment

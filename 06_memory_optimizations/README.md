@@ -4,6 +4,8 @@ Memory is the bottleneck of modern systems, and the optimizer's *single
 biggest job* on real programs is **getting things out of memory and into
 registers**, or, failing that, **doing fewer loads and stores**.
 
+![mem2reg promotes an alloca stack slot into SSA values joined by a phi](figures/mem2reg.svg)
+
 ## Map
 
 | #  | Example                          | Optimization                              |
@@ -82,6 +84,8 @@ into the SSA-name builder when GIMPLE is first generated.
 
 ## 02 · SROA — Scalar Replacement of Aggregates
 
+![Before/after: a struct alloca is scalarized and the alloca disappears](figures/02_sroa.svg)
+
 If a struct alloca is only accessed through individual fields, split it
 into separate scalar allocas (which then qualify for mem2reg).
 
@@ -94,16 +98,18 @@ int foo(int x) {
 }
 ```
 
-```
-   BEFORE SROA                              AFTER SROA + mem2reg
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE SROA                              AFTER SROA + mem2reg
    ───────────                              ────────────────────
    %p = alloca struct.Pair                  (no alloca at all)
    store %x,     getelementptr(%p,0,0)      %a = %x
    store %x+1,   getelementptr(%p,0,1)      %b = %x + 1
    %a = load     getelementptr(%p,0,0)      ret %a + %b      ;; → 2*%x + 1
    %b = load     getelementptr(%p,0,1)
-   ret %a + %b
-```
+   ret %a + %b</code></pre>
+</details>
 
 LLVM: `SROAPass`. GCC: `tree-sra.cc`.
 
@@ -141,15 +147,19 @@ You can help AA by:
 
 ## 04 · Store-to-load forwarding
 
+![Before/after: a load right after a store reuses the stored value](figures/04_store_to_load.svg)
+
 A store of value `v` immediately followed by a load from the *same*
 address can be replaced by `v` directly.
 
-```
-   BEFORE                            AFTER
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                            AFTER
    ──────                            ─────
    *p = x;                            *p = x;
-   y = *p;                            y = x;
-```
+   y = *p;                            y = x;</code></pre>
+</details>
 
 The hardware does this too (the *store buffer* forwards to subsequent
 loads), but the compiler version is even better because it lets the load's
@@ -159,20 +169,26 @@ LLVM: `MemorySSA` + `EarlyCSE` / `GVN`. GCC: `tree-ssa-sccvn.cc`.
 
 ## 05 · Global Value Numbering (GVN) for loads
 
+![Before/after: a redundant reload is replaced by the first value](figures/05_gvn.svg)
+
 GVN is CSE generalized to handle the entire CFG and memory. It can prove
 that two loads from the same address with no intervening store yield the
 same value:
 
-```
-   v1 = *p;
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   v1 = *p;
    ...                  ; some code that does not write through p
-   v2 = *p;             ; → v2 = v1
-```
+   v2 = *p;             ; → v2 = v1</code></pre>
+</details>
 
 LLVM: `GVNPass` (and `NewGVNPass`).
 GCC: `tree-ssa-pre.cc` / `tree-ssa-sccvn.cc`.
 
 ## 06 · Dead Store Elimination (DSE)
+
+![Before/after: a store overwritten before any read is removed](figures/06_dead_store_elim.svg)
 
 If a value is stored and then immediately *overwritten without being read*,
 the first store is dead.
@@ -185,16 +201,20 @@ the first store is dead.
 DSE also recognizes overlapping stores: writing `int *p = 0; *p = 1;`
 where the first store fully covers the second produces no first store.
 
-```
-   memset(buf, 0, 64);                memset(buf, 0, 64);
-   memset(buf, 0, 32);                (gone — covered by first memset)
-```
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   memset(buf, 0, 64);                memset(buf, 0, 64);
+   memset(buf, 0, 32);                (gone — covered by first memset)</code></pre>
+</details>
 
 LLVM: `DSEPass`. GCC: `tree-ssa-dse.cc`.
 
 Counter-example — *atomic* or *volatile* stores are never elided.
 
 ## 07 · MemCpyOpt
+
+![Before/after: a copy through a dead temporary is collapsed](figures/07_memcpy_opt.svg)
 
 Recognizes manual copy loops or struct-by-value copies and replaces them
 with `memcpy`/`memmove`, or further combines redundant memcpys.
@@ -207,6 +227,8 @@ with `memcpy`/`memmove`, or further combines redundant memcpys.
 LLVM: `MemCpyOptPass`. GCC: `tree-ssa-strlen.cc` + `tree-loop-distribute-patterns`.
 
 ## 08 · Escape analysis
+
+![Before/after: a non-escaping heap allocation is scalarized away](figures/08_escape_analysis.svg)
 
 If an allocation **never escapes** the function, it can be:
 

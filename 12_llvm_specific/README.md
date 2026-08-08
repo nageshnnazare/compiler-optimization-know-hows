@@ -4,8 +4,12 @@ The same reference treatment for the LLVM/Clang side.
 
 ## 1. The pipeline
 
-```
-   source.{c,cpp}
+![Clang emits LLVM IR, opt transforms it, llc lowers it to an object file](figures/pipeline.svg)
+
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   source.{c,cpp}
         │
         ▼  Clang front-end (AST, sema)
    LLVM IR (text .ll  /  bitcode .bc)
@@ -20,8 +24,8 @@ The same reference treatment for the LLVM/Clang side.
         │      ─ scheduler
         │      ─ asm printer
         ▼
-   object file
-```
+   object file</code></pre>
+</details>
 
 Every textbook LLVM pipeline is also pieceable on the command line:
 

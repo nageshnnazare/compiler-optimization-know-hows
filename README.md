@@ -32,7 +32,11 @@ optimization passes. Every example follows the same pattern:
 
 ## How to use this guide
 
-```
+![Learning roadmap: start at fundamentals, then follow the chapters through to practical](figures/roadmap.svg)
+
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+<pre><code>                            
                             ┌────────────────────────┐
                             │   00_fundamentals      │   Start HERE
                             │ pipeline, IR, SSA, CFG │
@@ -73,7 +77,7 @@ optimization passes. Every example follows the same pattern:
                   ▼                                         ▼
          ┌────────────────┐                        ┌────────────────┐
          │ 11 GCC         │                        │ 12 LLVM        │
-         │ flags & passes │                        │ opt & PM       │
+         │ flags &amp; passes │                        │ opt &amp; PM       │
          └────────┬───────┘                        └────────┬───────┘
                   └──────────────────┬──────────────────────┘
                                      ▼
@@ -81,8 +85,8 @@ optimization passes. Every example follows the same pattern:
                            │  13 practical    │
                            │ godbolt, perf,   │
                            │ benchmarking     │
-                           └──────────────────┘
-```
+                           └──────────────────┘</code></pre>
+</details>
 
 ## Chapter index
 

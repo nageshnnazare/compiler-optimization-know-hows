@@ -4,6 +4,8 @@ Loops are where programs spend their time, and where the optimizer earns its
 keep. This chapter walks through the loop transformations every serious
 performance engineer should be able to *recognize in assembly*.
 
+![Loop anatomy: preheader, header, body, latch, back-edge and exit](figures/loop-anatomy.svg)
+
 ## Map
 
 | #  | Example                          | Optimization                              |
@@ -26,8 +28,10 @@ performance engineer should be able to *recognize in assembly*.
 Before any optimization, both LLVM and GCC normalize loops to a **canonical
 form**:
 
-```
-                            ┌──────────────┐
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>                            ┌──────────────┐
                             │   preheader  │   single predecessor of header
                             │   (PH)       │   ← invariant code hoists here
                             └──────┬───────┘
@@ -53,8 +57,8 @@ form**:
                                        ▼
                                 ┌──────────────┐
                                 │   exit (X)   │
-                                └──────────────┘
-```
+                                └──────────────┘</code></pre>
+</details>
 
 Key vocabulary:
 
@@ -77,21 +81,27 @@ You can see all of these in any LLVM IR dump after `-loop-rotate` has run.
 
 ## 01 · Loop-Invariant Code Motion (LICM)
 
+![Before/after: an invariant expression is hoisted into the preheader](figures/01_licm.svg)
+
 > "If it doesn't depend on the loop, do it *before* the loop."
 
-```
-   BEFORE                            AFTER LICM
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                            AFTER LICM
    ──────                            ──────────
-   for (i=0;i<n;i++) {                t = x * y + k;
-       a[i] = (x * y + k) * a[i];     for (i=0;i<n;i++) {
+   for (i=0;i&lt;n;i++) {                t = x * y + k;
+       a[i] = (x * y + k) * a[i];     for (i=0;i&lt;n;i++) {
    }                                       a[i] = t * a[i];
-                                       }
-```
+                                       }</code></pre>
+</details>
 
 ### Diagram
 
-```
-                preheader
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>                preheader
                 ┌──────────┐
                 │   t = …  │ ◄── hoisted here
                 └────┬─────┘
@@ -103,8 +113,8 @@ You can see all of these in any LLVM IR dump after `-loop-rotate` has run.
            │     │  a[i]=t*…│   ← uses t, no longer recomputed
            │     └─────┬─────┘
            │           ▼
-           └─── latch (i++)
-```
+           └─── latch (i++)</code></pre>
+</details>
 
 ### Legality
 
@@ -123,21 +133,25 @@ You can see all of these in any LLVM IR dump after `-loop-rotate` has run.
 
 ## 02 · Loop unrolling
 
+![Before/after: the body is replicated four times with a scalar epilogue](figures/02_unroll.svg)
+
 Replicate the loop body N times so each iteration of the new loop covers N
 of the old iterations. Trade: more instructions, fewer branches, more
 instruction-level parallelism (ILP), better vectorization opportunities.
 
-```
-   BEFORE                            AFTER UNROLL BY 4
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                            AFTER UNROLL BY 4
    ──────                            ─────────────────
-   for (i=0;i<n;i++)                 for (i=0; i+3 < n; i+=4) {
+   for (i=0;i&lt;n;i++)                 for (i=0; i+3 &lt; n; i+=4) {
        a[i] = b[i] + c[i];               a[i  ] = b[i  ] + c[i  ];
                                           a[i+1] = b[i+1] + c[i+1];
                                           a[i+2] = b[i+2] + c[i+2];
                                           a[i+3] = b[i+3] + c[i+3];
                                       }
-                                      // scalar epilogue for i..n
-```
+                                      // scalar epilogue for i..n</code></pre>
+</details>
 
 ### Two flavours
 
@@ -149,8 +163,10 @@ instruction-level parallelism (ILP), better vectorization opportunities.
 
 ### CFG before / after
 
-```
-   BEFORE                                AFTER N=4
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                                AFTER N=4
    ──────                                ─────────
         ┌──header──┐                          ┌──header──┐
         │  cmp i,n │                          │  cmp i+3,n│
@@ -161,8 +177,8 @@ instruction-level parallelism (ILP), better vectorization opportunities.
          body                                4× body, then epilogue
             │                                      │
          latch                                  latch (i+=4)
-            └─►header                              └─►header
-```
+            └─►header                              └─►header</code></pre>
+</details>
 
 ### Cost-model knobs
 
@@ -205,19 +221,23 @@ When useful:
 
 ## 04 · Loop unswitching
 
+![Before/after: a loop-invariant branch is hoisted, splitting the loop](figures/04_unswitch.svg)
+
 Move a **loop-invariant condition** out of the loop, producing two loops
 each with the condition removed.
 
-```
-   BEFORE                            AFTER UNSWITCH
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                            AFTER UNSWITCH
    ──────                            ──────────────
-   for (i=0;i<n;i++) {                if (cond) {
-       if (cond)                          for (i=0;i<n;i++) a[i] = f(b[i]);
+   for (i=0;i&lt;n;i++) {                if (cond) {
+       if (cond)                          for (i=0;i&lt;n;i++) a[i] = f(b[i]);
            a[i] = f(b[i]);            } else {
-       else                               for (i=0;i<n;i++) a[i] = g(b[i]);
+       else                               for (i=0;i&lt;n;i++) a[i] = g(b[i]);
            a[i] = g(b[i]);            }
-   }
-```
+   }</code></pre>
+</details>
 
 This **doubles code size** but removes a per-iteration branch and lets each
 specialized loop vectorize independently. The cost model is strict.
@@ -229,17 +249,21 @@ GCC pass: `tree-ssa-loop-unswitch.cc`.
 
 ## 05 · Loop fusion (jamming)
 
+![Before/after: two loops with the same trip count merge into one](figures/05_fusion.svg)
+
 Combine two loops with the *same trip count* into one. Improves cache
 locality and removes overhead.
 
-```
-   BEFORE                                AFTER FUSE
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                                AFTER FUSE
    ──────                                ──────────
-   for (i=0;i<n;i++) a[i] = b[i] + 1;    for (i=0;i<n;i++) {
-   for (i=0;i<n;i++) c[i] = a[i] * 2;        a[i] = b[i] + 1;
+   for (i=0;i&lt;n;i++) a[i] = b[i] + 1;    for (i=0;i&lt;n;i++) {
+   for (i=0;i&lt;n;i++) c[i] = a[i] * 2;        a[i] = b[i] + 1;
                                               c[i] = a[i] * 2;
-                                          }
-```
+                                          }</code></pre>
+</details>
 
 Legality:
 
@@ -253,24 +277,30 @@ GCC: `tree-ssa-loop-distribute.cc` (also handles fission, the inverse).
 
 ## 06 · Loop fission (distribution)
 
+![Before/after: one loop splits so each statement gets its own loop](figures/06_fission.svg)
+
 The dual of fusion: split a loop with multiple statements into multiple
 loops, each handling a single statement. Beneficial when:
 
 - One statement is vectorizable and the other isn't.
 - The aggregate working set doesn't fit in cache, but each part does.
 
-```
-   BEFORE                                AFTER FISSION
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                                AFTER FISSION
    ──────                                ─────────────
-   for (i=0;i<n;i++) {                    for (i=0;i<n;i++) a[i] = b[i]+1;
-       a[i] = b[i] + 1;                   for (i=0;i<n;i++) hash_combine(&h, a[i]);
-       hash_combine(&h, a[i]);
-   }
-```
+   for (i=0;i&lt;n;i++) {                    for (i=0;i&lt;n;i++) a[i] = b[i]+1;
+       a[i] = b[i] + 1;                   for (i=0;i&lt;n;i++) hash_combine(&amp;h, a[i]);
+       hash_combine(&amp;h, a[i]);
+   }</code></pre>
+</details>
 
 ---
 
 ## 07 · Loop interchange
+
+![Before/after: swapping nested loops restores unit-stride access](figures/07_interchange.svg)
 
 Swap the order of two nested loops.
 
@@ -287,16 +317,18 @@ for (j=0;j<N;j++) for (i=0;i<N;i++) A[i][j] = B[j][i];
 The point: the *inner* loop now strides through memory the way the array is
 laid out, restoring cache locality.
 
-```
-   Row-major (C) layout of A[3][4]:
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   Row-major (C) layout of A[3][4]:
    ┌──┬──┬──┬──┐
    │00│01│02│03│  ◄── inner loop i (stride 1, NOT 4)
    ├──┼──┼──┼──┤
    │10│11│12│13│
    ├──┼──┼──┼──┤
    │20│21│22│23│
-   └──┴──┴──┴──┘
-```
+   └──┴──┴──┴──┘</code></pre>
+</details>
 
 LLVM pass: `LoopInterchangePass` (cost-model driven).
 GCC pass: `graphite-interchange.cc` (Polyhedral / Graphite framework).
@@ -349,18 +381,22 @@ inner loops of math libraries and let the compiler vectorize them.
 
 ## 09 · Induction-variable simplification
 
+![Before/after: an index multiply becomes a pointer increment](figures/09_iv_simplification.svg)
+
 Reduce the strength of induction-variable expressions: `a[i*8]` becomes a
 pointer that increments by 8 each iteration.
 
-```
-   BEFORE                                AFTER IV-simpl
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                                AFTER IV-simpl
    ──────                                ──────────────
-   for (i=0;i<n;i++) sum += a[i*8];      p = a;
-                                          for (i=0;i<n;i++) {
+   for (i=0;i&lt;n;i++) sum += a[i*8];      p = a;
+                                          for (i=0;i&lt;n;i++) {
                                               sum += *p;
                                               p += 8;
-                                          }
-```
+                                          }</code></pre>
+</details>
 
 Both compilers go further and **eliminate redundant IVs** when possible
 (one pointer can drive both loops). LLVM: `IndVarSimplifyPass`. GCC:
@@ -370,18 +406,22 @@ Both compilers go further and **eliminate redundant IVs** when possible
 
 ## 10 · Loop rerolling
 
+![Before/after: a manually unrolled body folds back into a clean loop](figures/10_rerolling.svg)
+
 The opposite of unrolling. If source code has been manually unrolled but
 the optimizer wants to vectorize, it first **rerolls** so it has a clean
 loop to vectorize.
 
-```
-   BEFORE (manual unroll-by-4)            AFTER REROLL
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE (manual unroll-by-4)            AFTER REROLL
    ──────────────────────────             ────────────
-   a[i  ] = b[i  ] + 1;                   for (k=0;k<4;k++)
+   a[i  ] = b[i  ] + 1;                   for (k=0;k&lt;4;k++)
    a[i+1] = b[i+1] + 1;                       a[i+k] = b[i+k] + 1;
    a[i+2] = b[i+2] + 1;
-   a[i+3] = b[i+3] + 1;
-```
+   a[i+3] = b[i+3] + 1;</code></pre>
+</details>
 
 LLVM pass: `LoopRerollPass`. Rarely fires; useful for cleaning up bad
 hand-written code.
@@ -390,18 +430,22 @@ hand-written code.
 
 ## 11 · Loop idiom recognition
 
+![Before/after: a pattern loop becomes a single call or intrinsic](figures/11_idiom_recognition.svg)
+
 A *loop* that implements a memset/memcpy/strlen/popcount pattern is
 replaced by a single call to a library function or to a wide intrinsic.
 
-```
-   BEFORE                                AFTER
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                                AFTER
    ──────                                ─────
-   for (i=0;i<n;i++) buf[i] = 0;         memset(buf, 0, n);
+   for (i=0;i&lt;n;i++) buf[i] = 0;         memset(buf, 0, n);
 
    while (*s++) ;                        s = (const char*)__rawmemchr(s, 0);
 
-   for (i=0;i<n;i++) c += (x>>i)&1;       c = __builtin_popcount(x);
-```
+   for (i=0;i&lt;n;i++) c += (x&gt;&gt;i)&amp;1;       c = __builtin_popcount(x);</code></pre>
+</details>
 
 LLVM: `LoopIdiomRecognizePass`. GCC: `tree-loop-distribution.cc` includes
 this.
@@ -415,21 +459,25 @@ the compiler can't assume `memset` exists in the runtime.
 
 ## 12 · Loop versioning
 
+![Before/after: a runtime check selects a vectorized or scalar version](figures/12_versioning.svg)
+
 When a critical legality property is unprovable at compile time, the
 optimizer can emit a **runtime check** and select between two versions of
 the loop:
 
-```
-   AFTER VERSIONING
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   AFTER VERSIONING
    ────────────────
-   if (a + n <= b || b + n <= a) {          // no overlap → safe to vectorize
+   if (a + n &lt;= b || b + n &lt;= a) {          // no overlap → safe to vectorize
        /* vectorized version */
-       for (i=0;i<n;i++) a[i] = b[i] + c[i];
+       for (i=0;i&lt;n;i++) a[i] = b[i] + c[i];
    } else {
        /* scalar fallback */
-       for (i=0;i<n;i++) a[i] = b[i] + c[i];
-   }
-```
+       for (i=0;i&lt;n;i++) a[i] = b[i] + c[i];
+   }</code></pre>
+</details>
 
 LLVM's loop vectorizer routinely emits these "memcheck" guards.
 

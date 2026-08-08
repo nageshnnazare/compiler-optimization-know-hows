@@ -6,6 +6,8 @@ fixed set of **physical registers** (e.g. 16 GPRs on x86-64, 32 on ARM64),
 spilling to the stack whatever doesn't fit. This is the *register
 allocator*.
 
+![Interference graph coloring: adjacent live ranges get different registers, extras spill](figures/reg-alloc.svg)
+
 ## Map
 
 | #  | Example                              | Topic                                  |
@@ -88,6 +90,32 @@ Cons: occasional poor decisions for very long-lived vregs.
 
 LLVM's *Greedy* allocator combines linear-scan with iterated splitting +
 "hints" from coalescing → top-tier code quality at near-linear cost.
+
+## Beyond coloring — what production allocators actually do
+
+Pure Chaitin-Briggs coloring is the textbook model; shipping allocators add
+several refinements that matter when you read real output:
+
+- **Rematerialization.** Rather than spill/reload a value, recompute it
+  where needed if it is *cheap and pure* (a constant, an `lea`, a
+  `getelementptr`). You'll see the same `mov reg, imm` re-appear instead of
+  a `[rsp+N]` reload — that's remat, not a missed CSE.
+- **Live-range splitting.** Instead of spilling a whole long-lived vreg,
+  the allocator splits its range at region boundaries so it lives in a
+  register where it's hot and in memory where it's cold. LLVM's *Greedy*
+  allocator is built around this.
+- **SSA-based allocation.** On SSA the interference graph is *chordal*, so
+  it is optimally colorable in polynomial time — no NP-hard search. Modern
+  allocators exploit this (LLVM allocates before full PHI-elimination).
+- **Coalescing bias / register hints.** Copies (including two-address ISA
+  constraints, PHIs, and calling-convention args) attach a *hint* so the
+  allocator prefers the register that makes the copy disappear.
+- **Spill-cost model.** The spill candidate is chosen by
+  `use-density / live-range-length` weighted by loop depth (a use inside a
+  loop counts ~10× per nesting level) — never blindly the longest range.
+- **PBQP allocator.** GCC and LLVM both ship a Partitioned Boolean
+  Quadratic Programming allocator that models irregular register classes
+  (e.g. paired/aligned registers) more precisely than coloring.
 
 ## What you (the programmer) can do
 

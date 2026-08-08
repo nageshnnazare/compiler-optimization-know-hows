@@ -5,6 +5,8 @@ backend has the smallest, fastest, and most predictable control flow
 possible. They almost always run *together with* SimplifyCFG to clean up
 trivial edges.
 
+![Jump threading routes a known-true branch straight past the redundant re-test](figures/jump-threading.svg)
+
 ## Map
 
 | #  | Example                            | Optimization                              |
@@ -64,6 +66,8 @@ LLVM pass: `JumpThreadingPass`. GCC pass: `tree-ssa-threadedge.cc`.
 
 ## 02 · SimplifyCFG
 
+![Before/after: a diamond of assignments becomes a branchless select](figures/02_cfg_simplification.svg)
+
 A grab-bag of CFG clean-ups:
 
 - Remove empty BBs (just an unconditional branch).
@@ -73,31 +77,37 @@ A grab-bag of CFG clean-ups:
 - Convert `if-x return a; else return b` into `return select(x, a, b)`.
 - Collapse trivial switches into branches.
 
-```
-   B1: br cond, B2, B3
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   B1: br cond, B2, B3
    B2: x = 1; br B4
    B3: x = 2; br B4
    B4: use x
 
                  ▼ SimplifyCFG: select
 
-   B1: x = select(cond, 1, 2); use x
-```
+   B1: x = select(cond, 1, 2); use x</code></pre>
+</details>
 
 LLVM: `SimplifyCFGPass`. GCC: `cleanup_cfg` (called repeatedly).
 
 ## 03 · If-conversion
 
+![Before/after: a small if-else becomes a conditional move](figures/03_if_conversion.svg)
+
 Replace a small `if-then-else` with a *predicated* / *select* / *cmov*
 sequence, removing the branch entirely.
 
-```
-   BEFORE                                  AFTER (cmov-style)
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                                  AFTER (cmov-style)
    ──────                                  ──────────────────
-   if (a > b) r = x;                       cmp a, b
+   if (a &gt; b) r = x;                       cmp a, b
    else       r = y;                       mov r, y
-                                           cmovg r, x
-```
+                                           cmovg r, x</code></pre>
+</details>
 
 When it helps:
 
@@ -206,18 +216,22 @@ LLVM: `MachineBlockPlacementPass`. GCC: `bb-reorder.cc`.
 
 ## 07 · Loop rotation
 
+![Before/after: a top-tested while becomes a guarded do-while](figures/07_loop_rotation.svg)
+
 Convert a *while-loop* (test at top) into a *do-while-loop* (test at
 bottom) plus a *guard*:
 
-```
-   BEFORE (while)                            AFTER (do-while + guard)
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE (while)                            AFTER (do-while + guard)
    ──────────────                            ────────────────────────
        header:                                if (!cond) goto exit
        if !cond goto exit                     loop:
          body                                   body
          goto header                            if cond goto loop
-       exit:                                   exit:
-```
+       exit:                                   exit:</code></pre>
+</details>
 
 This eliminates one branch per iteration and creates the canonical
 *pre-header / header / latch / exit* shape required by the vectorizer and
@@ -227,17 +241,21 @@ LLVM: `LoopRotatePass`. GCC happens implicitly through cfgcleanup.
 
 ## 08 · Branch folding / cross-jumping
 
+![Before/after: identical block tails are folded into one shared block](figures/08_branch_folding.svg)
+
 If two BBs end with identical sequences, the backend can fold them, so
 both predecessors branch to the same shared epilogue.
 
-```
-   BEFORE                                  AFTER
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                                  AFTER
    ──────                                  ─────
    B1: ... ; jmp epi1                       B1: ... ; jmp shared
    B2: ... ; jmp epi2                       B2: ... ; jmp shared
    epi1: store rax; pop rbp; ret            shared: store rax; pop rbp; ret
-   epi2: store rax; pop rbp; ret
-```
+   epi2: store rax; pop rbp; ret</code></pre>
+</details>
 
 LLVM: `BranchFolding`. GCC: in cfgcleanup.
 

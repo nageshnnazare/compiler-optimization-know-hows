@@ -10,8 +10,11 @@ later chapter assumes.
 
 ## 1. The compiler pipeline at 30 000 ft
 
-```
-                                  source.c
+![Compiler pipeline: frontend lowers to the mid-end optimizer, which feeds the backend](figures/pipeline.svg)
+
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+<pre><code>                                  source.c
                                      │
                                      ▼
                 ┌────────────────────────────────────┐
@@ -42,8 +45,8 @@ later chapter assumes.
                 │   ─ emit asm/object                │
                 └────────────────┬───────────────────┘
                                  ▼
-                              object.o
-```
+                              object.o</code></pre>
+</details>
 
 **GCC and LLVM both follow this shape**, but use different names:
 
@@ -94,6 +97,8 @@ TAC.
 A **basic block** is a maximal straight-line sequence with **one entry** and
 **one exit**. The CFG is the directed graph of basic blocks.
 
+![CFG with a diamond: BB1 branches to BB2/BB3, which merge at BB4](figures/cfg.svg)
+
 ```c
 int f(int x) {
     int y = x + 1;          // BB1
@@ -106,11 +111,12 @@ int f(int x) {
 }
 ```
 
-```
-            ┌────────────┐
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+<pre><code>            ┌────────────┐
             │ BB1        │
             │ y = x + 1  │
-            │ br y>0     │
+            │ br y&gt;0     │
             └─┬────────┬─┘
               │ true   │ false
               ▼        ▼
@@ -123,19 +129,22 @@ int f(int x) {
             ┌──────────┐
             │ BB4      │
             │ return y │
-            └──────────┘
-```
+            └──────────┘</code></pre>
+</details>
 
 ### 2.4 SSA (Static Single Assignment)
 
 In SSA, **every variable is assigned exactly once**. At join points we insert
 a synthetic **φ-node** ("phi") to merge incoming values.
 
-```
-            ┌─────────────────┐
+![SSA version of the CFG: BB4 uses a phi node to merge y2 and y3](figures/ssa.svg)
+
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+<pre><code>            ┌─────────────────┐
             │ BB1             │
             │ y1 = x + 1      │
-            │ br y1>0         │
+            │ br y1&gt;0         │
             └──┬───────────┬──┘
                ▼           ▼
         ┌────────────┐ ┌────────────┐
@@ -149,8 +158,8 @@ a synthetic **φ-node** ("phi") to merge incoming values.
               │ y4 = φ(y2 from BB2,      │
               │        y3 from BB3)      │
               │ return y4                │
-              └──────────────────────────┘
-```
+              └──────────────────────────┘</code></pre>
+</details>
 
 Why SSA matters:
 
@@ -249,8 +258,11 @@ You will see RTL mostly in **register-allocation** and **scheduling** dumps.
 
 ## 4. The optimizer is a pipeline of *analyses* and *transforms*
 
-```
-        ┌──────────┐    ┌──────────┐    ┌──────────┐
+![Analyses produce cached results that a transform consumes, then invalidates](figures/analyses.svg)
+
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+<pre><code>        ┌──────────┐    ┌──────────┐    ┌──────────┐
    IR ─►│ analysis │ ─► │ analysis │ ─► │ analysis │ ─► (cached results)
         │  pass A  │    │  pass B  │    │  pass C  │
         └──────────┘    └──────────┘    └──────────┘
@@ -262,8 +274,8 @@ You will see RTL mostly in **register-allocation** and **scheduling** dumps.
         └────────────────────┬─────────────────────────┘
                              │ invalidates some analyses
                              ▼
-                       fresh analyses, more transforms…
-```
+                       fresh analyses, more transforms…</code></pre>
+</details>
 
 A **transform** mutates the IR. An **analysis** is *pure*: it computes
 information (dominators, loop nests, alias sets) that transforms consume.
@@ -280,20 +292,23 @@ Key analyses (see [`04_data_flow_analysis/`](../04_data_flow_analysis/)):
 
 ## 5. Optimization levels at a glance
 
-```
-          ┌── Debuggability ─────────────────────────────────►
+![Optimization levels from -O0 to -Ofast trading debuggability for speed](figures/opt-levels.svg)
+
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+<pre><code>          ┌── Debuggability ─────────────────────────────────►
           │
           │  -O0   identity-translate; nothing folded, vars in memory
           │  -Og   like -O0 but with cheap, non-destructive passes
           │  -O1   local clean-ups; CSE, jump-thread, simple inline
           │  -O2   loop opts, vectorization, IPO, almost everything safe
           │  -O3   adds aggressive inlining, vectorizer cost-model relax
-          │  -Os   like -O2 but size-cost-model > speed
+          │  -Os   like -O2 but size-cost-model &gt; speed
           │  -Oz   like -Os but more aggressive about size (clang only)
           │  -Ofast = -O3 + -ffast-math (breaks IEEE!)
           │
-          ▼ Speed / Code-quality ────────────────────────────►
-```
+          ▼ Speed / Code-quality ────────────────────────────►</code></pre>
+</details>
 
 Both compilers ship a *fixed list* of passes per `-O` level. You can dump it:
 

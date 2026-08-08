@@ -4,6 +4,8 @@ SSA is the *single most important* representational choice in modern
 compilers. Every later chapter assumes you can read it; this one shows you
 how it is built and what makes it tick.
 
+![The dominance frontier of B and C is their join D, so a phi is placed at D](figures/dominance-frontier.svg)
+
 ## Map
 
 | #  | Example                            | Topic                                  |
@@ -16,18 +18,22 @@ how it is built and what makes it tick.
 
 ## What SSA is, in one sentence
 
+![Before/after: renaming into SSA inserts a phi at the join](figures/01_ssa_intro.svg)
+
 > *Every variable is assigned exactly once; at every join, a φ-node selects
 > which incoming definition flows out.*
 
-```
-   non-SSA                              SSA
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   non-SSA                              SSA
    ───────                              ───
    x = 1                                x_1 = 1
    if cond:                             if cond:
        x = 2                                x_2 = 2
    print(x)                             x_3 = φ(x_1, x_2)
-                                         print(x_3)
-```
+                                         print(x_3)</code></pre>
+</details>
 
 Why bother?
 
@@ -69,8 +75,10 @@ The art is in step 1 (DF) and step 3 (rename). Let's picture them.
 
 ## Dominance frontier — a picture
 
-```
-            Entry
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>            Entry
               │
               ▼
               A
@@ -88,8 +96,8 @@ The art is in step 1 (DF) and step 3 (rename). Let's picture them.
           A                                are B and C, both dominated by A)
         ┌─┼─┐              DF(B)     = { D }
         B C D              DF(C)     = { D }
-                           DF(D)     = ∅
-```
+                           DF(D)     = ∅</code></pre>
+</details>
 
 So if `x` is assigned in B (and not in C), we still need a φ in D, because
 D is on B's frontier — control may arrive at D from C *without* going
@@ -143,6 +151,8 @@ operands) on GIMPLE.
 
 ## Leaving SSA: the swap problem
 
+![Before/after: a temporary breaks the phi copy cycle when leaving SSA](figures/05_out_of_ssa.svg)
+
 Before code generation we must eliminate φs. Naïvely:
 
 ```
@@ -154,11 +164,13 @@ Before code generation we must eliminate φs. Naïvely:
 But this can introduce *correctness bugs* in the presence of *parallel*
 copies:
 
-```
-   At a join we have:           Naïve sequentialization gives:
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   At a join we have:           Naïve sequentialization gives:
       x = phi(y, ...)             x ← y
-      y = phi(x, ...)             y ← x      ← y already overwritten!
-```
+      y = phi(x, ...)             y ← x      ← y already overwritten!</code></pre>
+</details>
 
 This is the **swap problem**. Solutions:
 

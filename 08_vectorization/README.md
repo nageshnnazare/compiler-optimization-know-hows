@@ -7,6 +7,8 @@ Vectorization replaces a *scalar* loop iteration with a *SIMD* (Single
 Instruction Multiple Data) iteration that processes several elements at
 once.
 
+![Four scalar add iterations collapse into one packed SIMD add across lanes](figures/vectorization.svg)
+
 ## Map
 
 | #  | Example                              | Topic                                  |
@@ -129,6 +131,8 @@ You will see messages like:
 
 ## Reductions
 
+![Before/after: a serial sum becomes lane-wise adds plus a horizontal add](figures/02_reduction.svg)
+
 Naïve reduction:
 ```c
 int s = 0;
@@ -136,17 +140,19 @@ for (int i=0;i<n;i++) s += a[i];
 ```
 
 Vectorized:
-```
-   s = 0;
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   s = 0;
    v = (vector){0,0,0,0,0,0,0,0};
-   for (i=0; i+7<n; i+=8) {
+   for (i=0; i+7&lt;n; i+=8) {
        v += vload a[i:i+8];
    }
    /* horizontal reduction of v into a single scalar */
    s = v[0]+v[1]+v[2]+v[3]+v[4]+v[5]+v[6]+v[7];
    /* scalar tail */
-   for (; i<n; i++) s += a[i];
-```
+   for (; i&lt;n; i++) s += a[i];</code></pre>
+</details>
 
 For *floating-point* reductions the compiler will NOT vectorize by default
 because addition isn't associative in IEEE-754. Enable with
@@ -155,23 +161,60 @@ because addition isn't associative in IEEE-754. Enable with
 
 ## Masking — vectorizing loops with `if`
 
+![Before/after: a conditional body vectorizes with a per-lane mask](figures/04_masked.svg)
+
 ```c
 for (i=0;i<n;i++)
     if (a[i] > 0) b[i] = a[i] * 2;
 ```
 
-```
-   for (i=0; i+VF<=n; i+=VF) {
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   for (i=0; i+VF&lt;=n; i+=VF) {
        va = vload a[i:i+VF];
-       m  = va > 0;                 ; mask: per-lane bool
+       m  = va &gt; 0;                 ; mask: per-lane bool
        r  = va * 2;
        vmasked_store b[i:i+VF] = r, mask=m
-   }
-```
+   }</code></pre>
+</details>
 
 AVX-512 and SVE have *first-class* mask registers, so this is direct. On
 AVX2 the compiler may emulate the masked store with `vmaskmovps` or fall
 back to a select + blended store.
+
+## Advanced vectorization — what separates good from expert
+
+The textbook `a[i]=b[i]+c[i]` case is only the entry point. Real vectorizers
+juggle several more dimensions:
+
+- **Vectorization factor (VF) × interleave/unroll factor (UF).** The
+  vectorizer chooses *both* how many lanes per vector (VF) and how many
+  vector iterations to run back-to-back (UF, a.k.a. *interleaving* or
+  unroll-and-jam). UF hides latency by giving the out-of-order engine
+  several independent dependency chains. A loop reported as
+  `vectorization width: 8, interleaved count: 4` is doing 32 elements per
+  trip.
+- **Epilogue vectorization.** Instead of a *scalar* tail, LLVM can emit a
+  *second, narrower* vector loop for the remainder (e.g. VF8 main + VF4
+  epilogue), so a length-11 loop still runs mostly in vectors.
+- **Tail folding / predication.** On AVX-512 and Arm SVE the vectorizer
+  can fold the remainder *into* the main loop with an **active-lane mask**
+  (`llvm.get.active.lane.mask`), removing the tail entirely. This is why
+  SVE code has no scalar remainder at all.
+- **Gather / scatter.** Indirect accesses `a[idx[i]]` vectorize only if the
+  target has gather/scatter (AVX2 `vgatherdps`, AVX-512, SVE) *and* the cost
+  model believes it beats scalar. Otherwise it is a hard blocker.
+- **Scalable vectors (VLA).** Arm SVE and RISC-V RVV don't have a fixed
+  width; the VF is `vscale × N`, unknown until runtime. LLVM models these
+  as `<vscale x 4 x i32>` and the same VPlan drives both fixed and scalable
+  codegen.
+- **SLP vs loop vectorizer interplay.** After the loop vectorizer bails,
+  the SLP vectorizer still bundles straight-line isomorphic operations in
+  the (now-unrolled) body — the two run in sequence at `-O3`.
+
+Inspect the decision with `-mllvm -debug-only=loop-vectorize` (assert
+build) or the opt-remark YAML from `-fsave-optimization-record`.
 
 ## Hand-written intrinsics
 

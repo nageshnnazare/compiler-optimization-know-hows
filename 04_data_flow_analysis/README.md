@@ -4,6 +4,8 @@
 > they need before firing. This chapter gives you the four canonical
 > analyses, their lattices, and their direction.
 
+![Data-flow: predecessors meet into IN, a transfer function yields OUT](figures/dataflow.svg)
+
 ## Map
 
 | #  | Example                              | Analysis                                   |

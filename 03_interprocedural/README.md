@@ -5,6 +5,8 @@ function boundaries. The single most impactful interprocedural optimization
 is **inlining** — almost every other IPO derives its power from being able to
 *see across* a call.
 
+![Inlining pastes the callee body into the caller, removing the call boundary](figures/inlining.svg)
+
 ## Map
 
 | #  | Example                       | Optimization                                    |
@@ -118,50 +120,62 @@ Typical knobs:
 
 ## 02 · Interprocedural Sparse Conditional CP (IPSCCP)
 
+![Before/after: a constant argument specializes the callee](figures/02_ipsccp.svg)
+
 SCCP across the whole call graph. If every call to `f(x)` passes `x = 0`,
 the optimizer specializes `f` for `x = 0`.
 
-```
-   ┌────────────┐  call f(0)  ┌──────────────┐
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   ┌────────────┐  call f(0)  ┌──────────────┐
    │  caller A  │ ───────────►│              │
    └────────────┘             │   f(x)       │   ◄─── IPSCCP discovers
    ┌────────────┐  call f(0)  │   if (x) …   │       x always == 0,
    │  caller B  │ ───────────►│   else …     │       eliminates the
-   └────────────┘             └──────────────┘       `if` branch.
-```
+   └────────────┘             └──────────────┘       `if` branch.</code></pre>
+</details>
 
 LLVM: `IPSCCPPass`. GCC: `tree-ipa-ccp` plus `tree-ipa-prop`.
 
 ## 03 · Argument promotion
 
+![Before/after: a by-reference parameter is passed by value](figures/03_arg_promotion.svg)
+
 A function that takes a `T *` and only ever dereferences it (no escape, no
 stores) can be rewritten to take `T` by value. Result: one less indirection,
 the parameter ends up in a register.
 
-```
-   BEFORE                                  AFTER
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   BEFORE                                  AFTER
    ──────                                  ─────
    int hot(const int *p) {                 int hot(int v) {
        return *p + 1;                          return v + 1;
    }                                       }
    ...                                     ...
-   int r = hot(&x);                        int r = hot(x);
-```
+   int r = hot(&amp;x);                        int r = hot(x);</code></pre>
+</details>
 
 LLVM: `ArgumentPromotionPass`. GCC: `ipa-sra` (Scalar Replacement of
 Aggregates inter-procedurally).
 
 ## 04 · Devirtualization
 
+![Before/after: a virtual call is resolved to a direct, inlinable call](figures/04_devirtualization.svg)
+
 The C++ equivalent: a virtual call resolved at compile time.
 
-```
-   B *p = new D();
-   p->foo();                  ───►   D::foo(p);
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   B *p = new D();
+   p-&gt;foo();                  ───►   D::foo(p);
                                        │
                                        ▼
-                                  inline if small enough
-```
+                                  inline if small enough</code></pre>
+</details>
 
 Conditions:
 
@@ -175,18 +189,22 @@ LLVM: `WholeProgramDevirtPass` (with LTO). GCC: `-fdevirtualize`,
 
 ## 05 · Tail-call elimination (TCE)
 
+![Before/after: a tail-recursive call reuses the frame as a loop](figures/05_tail_call.svg)
+
 If a call is in *tail position*, the caller's frame can be **reused** by
 the callee. Recursive calls become loops.
 
-```
-   factorial(n, acc) {                   factorial:
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   factorial(n, acc) {                   factorial:
      if (n == 0) return acc;             1: cmp n, 0
      return factorial(n-1, acc*n);       2: je  done
    }                                     3: mul acc, n
                                           4: sub n,  1
                                           5: jmp 1             ← TCE: no call!
-                                          6: done: mov ret, acc
-```
+                                          6: done: mov ret, acc</code></pre>
+</details>
 
 LLVM: `TailCallElimPass`. GCC: `-foptimize-sibling-calls` (on by default).
 Both compilers also do **sibling-call** elimination across functions with
@@ -220,6 +238,8 @@ LLVM IR equivalents on the function: `readnone`, `readonly`, `writeonly`,
 `noreturn`, `nonnull`, `noalias`, `dereferenceable(N)`, `cold`, `hot`.
 
 ## 07 · Link-Time Optimization (LTO) and ThinLTO
+
+![Before/after: LTO inlines a cross-TU call and folds the constants](figures/07_lto.svg)
 
 Without LTO, each translation unit is optimized independently and the linker
 just shuffles bytes. With LTO, the optimizer **runs again** at link time

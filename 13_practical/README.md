@@ -6,8 +6,12 @@ the booby-traps.
 
 ## 1. The 5-step optimization recipe
 
-```
-   1. MEASURE   – never optimize without a profile.
+![The measure, attribute, inspect, change, re-measure optimization loop](figures/optimization-loop.svg)
+
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   1. MEASURE   – never optimize without a profile.
                   perf, Instruments, VTune, samply, AMD uProf.
 
    2. ATTRIBUTE – which function/loop is hot?
@@ -20,8 +24,8 @@ the booby-traps.
                   Don't change the compiler invocation without rebuilding from clean.
 
    5. RE-MEASURE – confirm the change actually helped.
-                   Beware regression in OTHER benchmarks.
-```
+                   Beware regression in OTHER benchmarks.</code></pre>
+</details>
 
 ## 2. Reading assembly: a quick primer
 

@@ -26,14 +26,18 @@ gcc -Q -O3 --help=optimizers | head -60
 
 ## 2. The two IRs
 
-```
-   front-end ──► GENERIC ──► GIMPLE ──► RTL ──► asm
+![GCC lowers GENERIC to GIMPLE to RTL to assembly across four stages](figures/pipeline.svg)
+
+<details class="ascii-diagram">
+<summary>ASCII diagram</summary>
+
+<pre><code>   front-end ──► GENERIC ──► GIMPLE ──► RTL ──► asm
                   │           │          │
               language-       SSA-ed     register
               independent     three-     transfer
               trees           address    language
-                              code       (≈ asm)
-```
+                              code       (≈ asm)</code></pre>
+</details>
 
 - **GENERIC** = language-independent tree from the front-end. Briefly held.
 - **GIMPLE** = three-address SSA tree-level IR. ALL the mid-end passes
