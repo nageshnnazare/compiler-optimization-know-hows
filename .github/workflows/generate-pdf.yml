@@ -1,0 +1,54 @@
+name: Generate compiler-opt-know-hows.pdf
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+          
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install WeasyPrint native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev
+
+      - name: Install Python dependencies
+        run: pip install markdown Pygments weasyprint
+
+      - name: Download pdfer script
+        run: |
+          wget -q -O pdfer.sh https://raw.githubusercontent.com/nageshnnazare/pdfer/refs/heads/main/pdfer.sh
+          chmod +x pdfer.sh
+
+      - name: Generate pdf
+        run: ./pdfer.sh -e weasyprint -o compiler-opt-know-hows.pdf
+
+      - name: Commit pdf if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f compiler-opt-know-hows.pdf
+          if ! git diff --cached --quiet; then
+            git commit -m "Generate pdf"
+            git pull --rebase
+            git push
+          else
+            echo "No changes to pdf"
+          fi
